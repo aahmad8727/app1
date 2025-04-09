@@ -1,16 +1,29 @@
+import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'firebase_options.dart';
 
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+@pragma('vm:entry-point')
+void notificationTapBackground(NotificationResponse notificationResponse) {
+  final payload = notificationResponse.payload;
+  debugPrint('onDidReceiveBackgroundNotificationResponse: $payload');
+}
+
 Future<void> _messageHandler(RemoteMessage message) async {
-  print('background message ${message.notification!.body}');
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  print('Background message received: ${message.notification?.body}');
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   FirebaseMessaging.onBackgroundMessage(_messageHandler);
+
   runApp(MessagingTutorial());
 }
 
@@ -27,8 +40,8 @@ class MessagingTutorial extends StatelessWidget {
 }
 
 class MyHomePage extends StatefulWidget {
-  MyHomePage({Key? key, this.title}) : super(key: key);
-  final String? title;
+  final String title;
+  const MyHomePage({Key? key, required this.title}) : super(key: key);
 
   @override
   _MyHomePageState createState() => _MyHomePageState();
@@ -36,47 +49,82 @@ class MyHomePage extends StatefulWidget {
 
 class _MyHomePageState extends State<MyHomePage> {
   late FirebaseMessaging messaging;
-  String? notificationText;
+
   @override
   void initState() {
     super.initState();
+    _initializeLocalNotifications();
+    _initializeFirebaseMessaging();
+  }
+
+  /// -----------------------------------------------------------------------
+  Future<void> _initializeLocalNotifications() async {
+    const AndroidInitializationSettings androidInitSettings =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+
+    final InitializationSettings initializationSettings =
+        InitializationSettings(android: androidInitSettings);
+
+    await flutterLocalNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        final payload = response.payload;
+        if (payload != null && payload.isNotEmpty) {
+          debugPrint('Notification tapped with payload: $payload');
+          // You can navigate to a specific screen, if needed.
+        }
+      },
+      onDidReceiveBackgroundNotificationResponse: notificationTapBackground,
+    );
+  }
+
+  void _initializeFirebaseMessaging() {
     messaging = FirebaseMessaging.instance;
+
     messaging.subscribeToTopic("messaging");
+
+    // Retrieve and print the FCM token
     messaging.getToken().then((value) {
-      print(value);
+      print("FCM Token: $value");
     });
+
+    // Listen for messages in the foreground
     FirebaseMessaging.onMessage.listen((RemoteMessage event) {
-      print("message recieved");
-      print(event.notification!.body);
-      print(event.data.values);
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: Text("Notification"),
-            content: Text(event.notification!.body!),
-            actions: [
-              TextButton(
-                child: Text("Ok"),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
-          );
-        },
-      );
+      print("Foreground message received: ${event.notification?.title}");
+      print("Body: ${event.notification?.body}");
+      print("Data: ${event.data}");
+
+      if (event.notification?.body != null) {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text(event.notification?.title ?? "Notification"),
+              content: Text(event.notification!.body!),
+              actions: [
+                TextButton(
+                  child: const Text("Ok"),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
     });
+
     FirebaseMessaging.onMessageOpenedApp.listen((message) {
-      print('Message clicked!');
+      print('Message clicked! Data: ${message.data}');
     });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title!)),
-      body: Center(child: Text("Messaging Tutorial")),
+      appBar: AppBar(title: Text(widget.title)),
+      body: const Center(child: Text("Messaging Tutorial")),
     );
   }
 }
